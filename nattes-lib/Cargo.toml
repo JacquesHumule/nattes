@@ -2,6 +2,7 @@
 name = "nattes"
 version = "0.1.0"
 edition = "2021"
+publish = true
 
 [dependencies]
 bytes = "1"
