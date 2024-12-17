@@ -16,6 +16,10 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+      - run: rustup toolchain install stable --profile minimal --no-self-update
+      - uses: Swatinem/rust-cache@v2
+      - name: Check
+        run: cargo check --verbose
       - name: Build
         run: cargo build --verbose
       - name: Run tests
