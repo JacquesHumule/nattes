@@ -36,9 +36,9 @@ jobs:
           profile: minimal
           toolchain: stable
           components: clippy
-          override: true
 
-      - uses: Swatinem/rust-cache
+      - name: Prepare cache
+        uses: Swatinem/rust-cache@v2
 
       - name: Install required cargo
         run: cargo install clippy-sarif sarif-fmt
