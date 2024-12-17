@@ -2,7 +2,15 @@
 name = "nattes"
 version = "0.1.0"
 edition = "2021"
-publish = true
+license = "MIT"
+authors = ["JacquesHumule <contact@jakumule.cc>"]
+readme = "README.md"
+repository = "https://github.com/JacquesHumule/nattes"
+description = """
+A simple message queue inspired by NATS
+"""
+categories = ["asynchronous"]
+keywords = ["message-queue", "nats"]
 
 [dependencies]
 bytes = "1"
