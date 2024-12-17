@@ -37,11 +37,15 @@ jobs:
           toolchain: stable
           components: clippy
 
-      - name: Prepare cache
-        uses: Swatinem/rust-cache@v2
+      - name: Install required cargo
+        uses: baptiste0928/cargo-install@v3
+        with:
+          crate: clippy-sarif
 
       - name: Install required cargo
-        run: cargo install clippy-sarif sarif-fmt
+        uses: baptiste0928/cargo-install@v3
+        with:
+          crate: sarif-fmt
 
       - name: Run rust-clippy
         run:
