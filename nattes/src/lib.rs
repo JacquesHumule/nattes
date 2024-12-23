@@ -7,16 +7,29 @@ mod tests;
 
 use bytes::Bytes;
 use futures::Stream;
-use std::pin::Pin;
-use std::str::FromStr;
-use std::sync::{Arc, Mutex};
-use std::task::{Context, Poll};
+use std::fmt::Display;
+use std::{
+    collections::HashMap,
+    pin::Pin,
+    str::FromStr,
+    sync::{Arc, Mutex},
+    task::{Context, Poll},
+};
 use thiserror::Error;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
+use uuid::Uuid;
 
 ///Nattes is a clonable instance of the message queue
+#[derive(Clone, Default)]
 pub struct Nattes {
-    subscribers: Arc<Mutex<Vec<(SubscribeSubject, Sender<Bytes>)>>>,
+    subscribers: Arc<Mutex<HashMap<Uuid, SubscriberHandle>>>,
+}
+
+///SubscriberHandle is the internal reference of a subscriber
+#[derive(Clone)]
+pub struct SubscriberHandle {
+    subscribe_subject: SubscribeSubject,
+    sender: Sender<Bytes>,
 }
 
 #[derive(Debug, Error)]
@@ -45,9 +58,21 @@ impl FromStr for PublishSubject {
     }
 }
 
-impl Into<SubscribeSubject> for PublishSubject {
-    fn into(self) -> SubscribeSubject {
-        SubscribeSubject(self.0)
+impl From<PublishSubject> for SubscribeSubject {
+    fn from(value: PublishSubject) -> Self {
+        Self(value.0)
+    }
+}
+
+impl Display for PublishSubject {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0.join("."))
+    }
+}
+
+impl From<PublishSubject> for String {
+    fn from(value: PublishSubject) -> Self {
+        value.0.join(".")
     }
 }
 #[derive(Debug, Clone)]
@@ -65,22 +90,30 @@ impl FromStr for SubscribeSubject {
             let part = &subject_parts[i];
 
             // Match any part (one time)
-            if part.contains('*') {
-                if part != "*" {
-                    return Err(NatsError::InvalidSubscribeSubject);
-                }
+            if part.contains('*') && part != "*" {
+                return Err(NatsError::InvalidSubscribeSubject);
             }
 
             // Match any part (to the end)
-            if part.contains('>') {
-                if part != ">" || i != subject_parts.len() - 1 {
-                    return Err(NatsError::InvalidSubscribeSubject);
-                }
+            if part.contains('>') && part != ">" || i != subject_parts.len() - 1 {
+                return Err(NatsError::InvalidSubscribeSubject);
             }
 
             result.push(part.into());
         }
         Ok(SubscribeSubject(result))
+    }
+}
+
+impl Display for SubscribeSubject {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0.join("."))
+    }
+}
+
+impl From<SubscribeSubject> for String {
+    fn from(val: SubscribeSubject) -> Self {
+        val.0.join(".")
     }
 }
 
@@ -105,7 +138,7 @@ impl SubscribeSubject {
 impl Nattes {
     pub fn new() -> Self {
         Self {
-            subscribers: Arc::new(Mutex::new(Vec::new())),
+            ..Default::default()
         }
     }
 
@@ -121,9 +154,9 @@ impl Nattes {
 
         let message = message.into();
 
-        for (sub, tx) in list {
-            if (sub.check_subject(&subject)) {
-                tx.send(message.clone()).await?
+        for handle in list.values() {
+            if handle.subscribe_subject.check_subject(&subject) {
+                handle.sender.send(message.clone()).await?
             }
         }
 
@@ -132,28 +165,43 @@ impl Nattes {
 
     pub async fn subscribe(&self, subject: SubscribeSubject) -> Result<Subscriber, NatsError> {
         let (tx, rx) = channel(100);
+        let uuid = Uuid::now_v7();
+        let handle = SubscriberHandle {
+            subscribe_subject: subject.clone(),
+            sender: tx,
+        };
+
         {
             let mut lock = self.subscribers.lock().unwrap();
-            lock.push((subject.clone(), tx));
+            lock.insert(uuid, handle);
         }
 
         Ok(Subscriber {
+            uuid,
             subject,
             channel: rx,
             nattes: Nattes::new(),
         })
     }
 
-    pub async fn request(subject: PublishSubject, message: impl Into<Bytes>) {
+    pub async fn request(_subject: PublishSubject, _message: impl Into<Bytes>) {
         unimplemented!()
     }
 
-    pub async fn reply(subject: SubscribeSubject) {
+    pub async fn reply(_subject: SubscribeSubject) {
         unimplemented!()
+    }
+
+    pub(self) fn unsubscribe(&self, uuid: Uuid) {
+        {
+            let mut lock = self.subscribers.lock().unwrap();
+            lock.remove(&uuid);
+        }
     }
 }
 
 pub struct Subscriber {
+    uuid: Uuid,
     subject: SubscribeSubject,
     channel: Receiver<Bytes>,
     nattes: Nattes,
@@ -164,5 +212,21 @@ impl Stream for Subscriber {
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         self.channel.poll_recv(cx)
+    }
+}
+
+impl Subscriber {
+    pub async fn unsubscribe(self) {
+        drop(self)
+    }
+
+    pub fn subject(&self) -> SubscribeSubject {
+        self.subject.clone()
+    }
+}
+
+impl Drop for Subscriber {
+    fn drop(&mut self) {
+        self.nattes.unsubscribe(self.uuid)
     }
 }
