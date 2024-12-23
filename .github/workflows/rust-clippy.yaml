@@ -43,6 +43,9 @@ jobs:
         with:
           crate: sarif-fmt
 
+      - name: Prepare Cache
+        uses: Swatinem/rust-cache@v2
+
       - name: Run rust-clippy
         run:
           cargo clippy
